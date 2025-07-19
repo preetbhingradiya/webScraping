@@ -1,0 +1,19 @@
+{
+  "name": "puppeteer",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "puppeteer.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "puppeteer": "^24.14.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
