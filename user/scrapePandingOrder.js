@@ -1,89 +1,7 @@
-// import puppeteer from 'puppeteer-extra';
-// import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-// import fs from 'fs/promises';
-
-// puppeteer.use(StealthPlugin());
-
-// function delay(ms) {
-//   return new Promise(resolve => setTimeout(resolve, ms));
-// }
-
-// async function scrapePendingOrders() {
-//   console.log('🚀 Starting scraper...');
-
-//   const browser = await puppeteer.launch({
-//     headless: false, // headless: 'new' or false is better to bypass bot protection
-//     defaultViewport: null,
-//     args: [
-//       '--no-sandbox',
-//       '--disable-setuid-sandbox',
-//     ],
-//   });
-
-//   const page = await browser.newPage();
-
-//   try {
-//     // Set user-agent like a real browser
-//     await page.setUserAgent(
-//       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-//       "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-//     );
-
-//     const cookies = JSON.parse(await fs.readFile('meesho-cookies.json', 'utf-8'));
-//     await page.setCookie(...cookies);
-
-//     console.log('🌐 Navigating to Pending Orders...');
-//     await page.goto(
-//       'https://supplier.meesho.com/panel/v3/new/fulfillment/xrgs8/orders/pending',
-//       { waitUntil: 'domcontentloaded', timeout: 60000 }
-//     );
-
-//     console.log('⏳ Waiting for order table...');
-//     await page.waitForSelector('tbody.MuiTableBody-root tr.MuiTableRow-root', { timeout: 30000 });
-//     await delay(2000);
-
-//     const data = await page.evaluate(() => {
-//       const rows = document.querySelectorAll('tbody.MuiTableBody-root tr.MuiTableRow-root');
-//       const products = [];
-
-//       rows.forEach(row => {
-//         const cells = row.querySelectorAll('td');
-//         if (cells.length >= 7) {
-//           const productName = cells[1]?.querySelector('p:first-of-type')?.innerText.trim() || '';
-//           const subOrderId = cells[2]?.innerText.trim() || '';
-//           const skuId = cells[3]?.innerText.trim() || '';
-//           const meeshoId = cells[4]?.innerText.trim() || '';
-//           const quantity = cells[5]?.innerText.trim() || '';
-//           const size = cells[6]?.innerText.trim() || '';
-
-//           products.push({ productName, subOrderId, skuId, meeshoId, quantity, size });
-//         }
-//       });
-
-//       return products;
-//     });
-
-//     console.log(`✅ Scraped ${data.length} orders.`);
-//     await fs.writeFile('pending-orders.json', JSON.stringify(data, null, 2));
-//     console.log('📁 Data saved to pending-orders.json');
-
-//   } catch (err) {
-//     console.error("❌ Error:", err.message);
-//     await page.screenshot({ path: 'debug_screenshot.png', fullPage: true });
-//     const html = await page.content();
-//     await fs.writeFile('debug_page.html', html);
-//   } finally {
-//     await browser.close();
-//     console.log("🔒 Browser closed.");
-//   }
-// }
-
-// scrapePendingOrders();
-
 import puppeteer from "puppeteer";
 import dotenv from "dotenv";
 import fs from "fs/promises";
-import path  from "path";
+import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -122,33 +40,32 @@ async function loadCookiesIfAvailable(page) {
   }
 }
 
-async function autoScrollUntilEnd(page, rowSelector) {
-  await page.evaluate(async (rowSelector) => {
-    const scrollContainer = document.querySelector(".MuiTableContainer-root");
-    if (!scrollContainer) {
-      console.error("❌ Scroll container not found!");
-      return;
+async function scrollTableToLoadAllRows(page) {
+  const maxRetries = 10;
+  let previousRowCount = 0;
+
+  for (let i = 0; i < maxRetries; i++) {
+    const rows = await page.$$(
+      "tbody.MuiTableBody-root tr.MuiTableRow-root"
+    );
+    const currentRowCount = rows.length;
+
+    console.log(`📊 Current rows: ${currentRowCount}`);
+
+    if (currentRowCount === previousRowCount) {
+      console.log("✅ All rows loaded.");
+      break;
     }
 
-    let previousHeight = 0;
-    let sameCountLimit = 5;
-    let retry = 0;
+    previousRowCount = currentRowCount;
 
-    while (retry < sameCountLimit) {
-      scrollContainer.scrollBy(0, 300);
-      await new Promise((r) => setTimeout(r, 1000));
+    await page.evaluate(() => {
+      const container = document.querySelector(".MuiTableContainer-root");
+      container?.scrollBy({ top: 500, behavior: "smooth" });
+    });
 
-      const currentHeight = scrollContainer.scrollHeight;
-
-      // Detect no more new rows
-      if (currentHeight === previousHeight) {
-        retry++;
-      } else {
-        retry = 0;
-        previousHeight = currentHeight;
-      }
-    }
-  }, rowSelector);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 }
 
 async function scrapePendingOrders(email, password) {
@@ -165,7 +82,6 @@ async function scrapePendingOrders(email, password) {
   await loadCookiesIfAvailable(page);
   await page.goto(PENDING_ORDER_URL, { waitUntil: "networkidle2" });
 
-  // Check if still on login page
   if (page.url().includes("login")) {
     await loginAndSaveCookies(page, email, password);
     await page.goto(PENDING_ORDER_URL, { waitUntil: "networkidle2" });
@@ -178,13 +94,8 @@ async function scrapePendingOrders(email, password) {
       timeout: 20000,
     });
 
-    console.log("⏳ Waiting for order table...");
-    await page.waitForSelector("tbody.MuiTableBody-root tr.MuiTableRow-root");
-
-    // 👉 Scroll to load all orders
-    // await autoScrollUntilEnd(page, "MuiTableBody-root css-1xnox0e");
-    // await new Promise((resolve) => setTimeout(resolve, 2000));
-
+    console.log("⏳ Scrolling to load all rows...");
+    await scrollTableToLoadAllRows(page);
 
     const orders = await page.$$eval(
       "tbody.MuiTableBody-root tr.MuiTableRow-root",
@@ -192,11 +103,8 @@ async function scrapePendingOrders(email, password) {
         let index = 1;
         return rows.map((row) => {
           const cells = row.querySelectorAll("td");
-          console.log("INDEX ," + index, cells);
-
           return {
             index: index++,
-            // subOrderId: cells[0]?.innerText.trim() || null,
             productDetails: cells[1]?.innerText.trim() || null,
             subOrderId: cells[2]?.innerText.trim() || null,
             skuId: cells[3]?.innerText.trim() || null,
@@ -227,9 +135,7 @@ const email = process.env.USER_EMAIL;
 const password = process.env.USER_PASSWORD;
 
 if (!email || !password) {
-  console.error(
-    "❌ Please set USER_EMAIL and USER_PASSWORD in your .env file."
-  );
+  console.error("❌ Please set USER_EMAIL and USER_PASSWORD in your .env file.");
   process.exit(1);
 }
 
